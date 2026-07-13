@@ -1,11 +1,11 @@
 """Доменные модели приложения."""
 
-from people_monitor.domain.enums import CocoClass, RoiAreaRelation
+from people_monitor.domain.enums import CocoClass, QueueState
 from people_monitor.domain.models import (
     BoundingBox,
-    ExitEvent,
     FrameAnalysis,
-    RoiEvaluation,
+    QueueFullEvent,
+    RoiMembership,
     TrackedDetection,
 )
 from people_monitor.domain.types import Frame, NormalizedPoint, Point
@@ -13,12 +13,12 @@ from people_monitor.domain.types import Frame, NormalizedPoint, Point
 __all__ = [
     "BoundingBox",
     "CocoClass",
-    "ExitEvent",
     "Frame",
     "FrameAnalysis",
     "NormalizedPoint",
     "Point",
-    "RoiAreaRelation",
-    "RoiEvaluation",
+    "QueueFullEvent",
+    "QueueState",
+    "RoiMembership",
     "TrackedDetection",
 ]

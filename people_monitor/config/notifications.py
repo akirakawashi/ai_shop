@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator
 from pydantic_settings import SettingsConfigDict
@@ -39,6 +40,10 @@ class NotificationConfig(_BaseConfig):
         default=True,
         description="Доставить накопленные уведомления перед завершением",
     )
+    alert_message: NonBlankString = Field(
+        default="⚠️ Откройте вторую кассу",
+        description="Заголовок уведомления о заполненной очереди",
+    )
 
 
 class TelegramConfig(_BaseConfig):
@@ -62,6 +67,10 @@ class TelegramConfig(_BaseConfig):
         default="https://api.telegram.org",
         description="Базовый HTTPS URL Telegram API или reverse proxy",
     )
+    proxy_url: SecretStr | None = Field(
+        default=None,
+        description="Секретный URL HTTP-прокси для запросов Telegram",
+    )
     timeout_seconds: PositiveFloat = Field(
         default=10.0,
         description="Timeout одного HTTP-запроса",
@@ -79,7 +88,7 @@ class TelegramConfig(_BaseConfig):
         description="Прикладывать JPEG кадра к уведомлению",
     )
     snapshot_filename: NonBlankString = Field(
-        default="roi-event.jpg",
+        default="queue-full.jpg",
         description="Имя JPEG-файла в Telegram multipart-запросе",
     )
 
@@ -90,6 +99,21 @@ class TelegramConfig(_BaseConfig):
             return None
         token = value.get_secret_value().strip()
         return SecretStr(token) if token else None
+
+    @field_validator("proxy_url")
+    @classmethod
+    def normalize_proxy_url(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is None:
+            return None
+        proxy_url = value.get_secret_value().strip()
+        if not proxy_url:
+            return None
+        parsed = urlparse(proxy_url)
+        if parsed.scheme.lower() != "http" or not parsed.hostname:
+            raise ValueError("Telegram proxy должен быть корректным HTTP URL")
+        if parsed.query or parsed.fragment:
+            raise ValueError("Telegram proxy не должен содержать query или fragment")
+        return SecretStr(proxy_url)
 
     @field_validator("api_base_url")
     @classmethod

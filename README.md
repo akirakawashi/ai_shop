@@ -1,84 +1,55 @@
-# Контроль выхода людей из ROI
+# Контроль заполненности очереди в ROI
 
-Приложение детектирует и отслеживает людей в видеопотоке. Для каждого bbox
-вычисляется точная площадь пересечения с выпуклым ROI. Бизнес-правило не
-настраивается произвольным порогом:
+Приложение в реальном времени детектирует людей в видеопотоке и отправляет
+уведомление «Откройте вторую кассу», когда заданная зона ожидания достигает
+настроенной вместимости.
 
-```text
-outside_area > inside_area  → выход
-outside_area = inside_area  → нейтральная граница
-outside_area < inside_area  → внутри
-```
+Человек относится к ROI, если нижняя центральная точка его `bbox` (примерное
+положение ног) находится внутри выпуклого полигона. Такой расчёт выполняется за
+константное для небольшого ROI время и не требует вычисления пересечения площадей.
+В подсчёт входят только уникальные `track_id`, поэтому один человек не может быть
+посчитан дважды в одном кадре.
 
-Равенство не создаёт событие и не подтверждает нахождение внутри.
-
-## Архитектура
+## Поток обработки
 
 ```text
-camera/file/RTSP
-       ↓
-single-thread vision executor: OpenCV + YOLO + ByteTrack
-       ↓
-ConvexPolygonRoi → RoiAreaRelation enum
-       ↓
-BboxExitMonitor (state machine на каждый track_id)
-       ├──→ JSONL + JPEG
-       └──→ asyncio.Queue → async Telegram Bot API
+camera / file / RTSP
+        ↓
+OpenCV → YOLO → ByteTrack
+        ↓
+нижняя точка bbox внутри ConvexPolygonRoi?
+        ↓
+QueueOccupancyMonitor
+        ├──→ JSONL + JPEG
+        └──→ asyncio.Queue → Telegram Bot API через HTTP proxy
 ```
 
-Основной CV-конвейер оставлен синхронным внутри каждого кадра: ByteTrack зависит
-от порядка кадров. Блокирующие `VideoCapture.read()` и `YOLO.track()` выполняются
-в отдельном executor ровно с одним потоком, поэтому порядок и thread affinity не
-нарушаются. Модель лениво загружается там же при первом кадре, а event loop
-остаётся свободным для Telegram, retry и shutdown.
+OpenCV, YOLO и ByteTrack обрабатываются последовательно в одном выделенном
+потоке, чтобы сохранить порядок кадров и состояние трекера. Telegram работает
+асинхронно и не блокирует видеоконвейер.
 
-Основные пакеты:
+## Состояния очереди
 
 ```text
-people_monitor/
-├── config/            # отдельные BaseSettings-секции и корневой AppConfig
-├── domain/            # immutable dataclass, enum и тип Frame
-├── detection/         # контракт трекера и адаптер Ultralytics
-├── geometry/          # валидация и clipping выпуклого ROI
-├── events/            # автомат состояний track_id
-├── notifications/     # async Telegram, logging и bounded queue
-├── pipeline/          # упорядоченная обработка кадров
-├── storage/           # потокобезопасный JSONL
-├── video/             # протокол FrameSource и OpenCV-адаптер
-└── visualization/     # ROI, bbox, состояния и track_id
+available
+   ↓ достигнута вместимость
+confirming_full
+   ↓ нужное число кадров подряд
+full → одно уведомление
+   ↓ количество стало меньше вместимости
+recovering
+   ↓ устойчивое освобождение
+available
 ```
 
-## Настройки
+Если ROI снова заполняется до завершения `recovering`, повторное уведомление не
+создаётся. Дополнительный cooldown ограничивает частоту событий после полностью
+завершённых циклов заполнения и освобождения.
 
-TOML и ручной парсер не используются. Каждая секция в
-`people_monitor/config/` является самостоятельным `BaseSettings`-классом со
-своим коротким env-префиксом:
+## Конфигурация
 
-| Секция | Префикс |
-|---|---|
-| `CameraConfig` | `CAMERA_` |
-| `ModelConfig` | `MODEL_` |
-| `RoiConfig` | `ROI_` |
-| `EventConfig` | `EVENT_` |
-| `NotificationConfig` | `NOTIFICATION_` |
-| `TelegramConfig` | `TELEGRAM_` |
-| `OutputConfig` | `OUTPUT_` |
-| `VisualizationConfig` | `VISUALIZATION_` |
-| `RuntimeConfig` | `RUNTIME_` |
-
-Поля секций задаются плоскими именами без общего префикса.
-`AppConfig.from_env()` собирает готовую конфигурацию приложения из этих секций.
-Способы загрузки:
-
-```python
-from people_monitor.config import AppConfig
-
-AppConfig.from_env()                       # прочитать .env
-AppConfig.from_env("camera-1.env")         # прочитать указанный файл
-AppConfig.from_env(None)                   # не читать dotenv
-```
-
-Значения из environment имеют приоритет над env-файлом.
+Все настройки читаются через отдельные Pydantic Settings-секции из `.env` или
+из файла, переданного через `--env-file`.
 
 Подготовка локального файла:
 
@@ -86,108 +57,82 @@ AppConfig.from_env(None)                   # не читать dotenv
 cp .env.example .env
 ```
 
-Примеры:
+Минимальный тест с одним человеком:
 
 ```dotenv
 CAMERA_SOURCE=test.mp4
-MODEL_CONFIDENCE=0.35
-EVENT_OUTSIDE_CONFIRM_FRAMES=5
-TELEGRAM_ENABLED=false
-```
+CAMERA_SOURCE_KIND=file
 
-ROI передаётся как JSON-массив нормализованных координат:
+ROI_POINTS=[[0.40,0.35],[0.60,0.35],[0.60,0.75],[0.40,0.75]]
 
-```dotenv
-ROI_POINTS=[[0.10,0.20],[0.90,0.20],[0.90,0.90],[0.10,0.90]]
-```
+EVENT_ROI_CAPACITY=1
+EVENT_FULL_CONFIRM_FRAMES=5
+EVENT_RECOVERY_CONFIRM_FRAMES=10
+EVENT_COOLDOWN_SECONDS=60.0
 
-Поддерживается только простой выпуклый полигон. Повторяющиеся вершины,
-самопересечение, нулевая площадь и координаты вне диапазона `[0, 1]`
-отклоняются при старте.
+NOTIFICATION_ALERT_MESSAGE="⚠️ Откройте вторую кассу"
 
-Секрет Telegram хранится как `SecretStr`:
-
-```dotenv
 TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
+TELEGRAM_PROXY_URL=http://login:password@proxy.example:3128
+TELEGRAM_SEND_SNAPSHOT=true
 ```
 
-Он не сериализуется и не попадает в сообщения об HTTP-ошибках.
-Размер очереди и правила graceful shutdown не привязаны к Telegram и находятся
-в секции `NOTIFICATION_*`. Поэтому канал доставки можно заменить
-без изменения видеоконвейера. Для drain очереди и закрытия notifier предусмотрены
-раздельные timeout, чтобы зависшая отправка не лишала HTTP-клиент cleanup.
+`ROI_POINTS` — JSON-массив нормализованных координат `[x, y]` в диапазоне
+`[0, 1]`. Поддерживается простой выпуклый полигон с вершинами по часовой или
+против часовой стрелки. Точка на границе считается находящейся внутри ROI.
 
-## Подтверждение события
+Для рабочей кассы после теста достаточно заменить ROI и вместимость:
 
-Для каждого `track_id` используется закрытое состояние:
+```dotenv
+EVENT_ROI_CAPACITY=5
+```
 
-1. `OBSERVING` — трек ещё не подтверждён внутри.
-2. `ARMED` — внутренняя площадь преобладала нужное число кадров.
-3. `NOTIFIED` — выход отправлен; повтор возможен после подтверждённого возврата.
-
-`OUTSIDE_CONFIRM_FRAMES` фильтрует дрожание bbox. Пропуск кадра сбрасывает
-текущий streak. Дубликаты одного `track_id` в кадре объединяются по максимальной
-уверенности. Cooldown использует монотонные часы, а время видео хранится отдельно.
+`TELEGRAM_BOT_TOKEN` и `TELEGRAM_PROXY_URL` хранятся как `SecretStr`. Файл `.env`
+игнорируется Git. Токен и полный proxy URL удаляются из внутренних HTTPX-логов.
 
 ## Запуск
 
-Локальная проверка без Telegram:
+С реальным Telegram:
 
 ```bash
-python main.py --dry-run
+uv run python main.py
 ```
 
-В этом режиме используется `LoggingNotifier`; Telegram credentials не нужны,
-даже если `TELEGRAM_ENABLED=true`.
-
-Другой env-файл:
+Без обращения к Telegram:
 
 ```bash
-python main.py --env-file deployment/camera-1.env
+uv run python main.py --dry-run
 ```
 
-CLI передаёт этот путь в `AppConfig.from_env(...)`; без `--env-file` вызывается
-`AppConfig.from_env()` и загружается `.env`.
-
-Обычный режим использует `.env`:
+Другой файл настроек:
 
 ```bash
-python main.py
+uv run python main.py --env-file deployment/camera-1.env
 ```
 
-`CAMERA_SOURCE` принимает путь, RTSP URL или строковый индекс камеры.
-Интерпретацию можно зафиксировать через
-`CAMERA_SOURCE_KIND=file|stream|device|auto`. Для live-источника
-настраиваются backend timeout и ограниченный exponential reconnect:
+Процесс работает, пока открыт терминал и не получен `Ctrl+C`. Для постоянного
+развёртывания следует запускать отдельный экземпляр приложения на камеру через
+`systemd` или контейнер с политикой автоматического перезапуска.
 
-```dotenv
-CAMERA_STREAM_OPEN_TIMEOUT_MILLISECONDS=10000
-CAMERA_STREAM_READ_TIMEOUT_MILLISECONDS=10000
-CAMERA_RECONNECT_ATTEMPTS=5
-CAMERA_RECONNECT_BACKOFF_SECONDS=1.0
-CAMERA_RECONNECT_MAX_BACKOFF_SECONDS=30.0
-```
+## Первый end-to-end тест
 
-Для файла `read() == false` означает EOF. Для камеры или сетевого потока это
-считается сбоем и запускает переподключение; после исчерпания попыток приложение
-завершается с явной ошибкой. Backoff прерывается сразу при shutdown. После
-успешного reconnect сбрасываются ByteTrack и состояния событий, поэтому старый
-streak не может породить ложное уведомление на новом участке потока.
-
-OpenCV timeout зависит от выбранного video backend. Если native-вызов
-`VideoCapture.open/read` игнорирует timeout, Python не может безопасно прервать
-уже выполняющийся вызов в потоке. Для жёсткой гарантии остановки такой capture
-нужно изолировать отдельным процессом; текущая реализация сохраняет event loop
-отзывчивым и гарантированно прерывает только Python-level retry/backoff.
+1. Указать доступный видеофайл, устройство или RTSP-поток в `CAMERA_SOURCE`.
+2. Оставить тестовую вместимость `1` и маленькую ROI.
+3. Запустить приложение без `--dry-run`.
+4. Войти ногами в нарисованную ROI и оставаться там минимум пять обработанных
+   кадров.
+5. Проверить одно сообщение и JPEG в Telegram.
+6. Остаться внутри и убедиться, что повторных сообщений нет.
+7. Выйти минимум на десять кадров и войти снова: должно прийти новое сообщение.
 
 ## Проверки
 
-В `tests/` описаны сценарии геометрии, равенства площадей, пропусков кадров,
-duplicate track ID, cooldown, env precedence, жизненного цикла async worker и
-безопасной обработки ошибок Telegram, а также EOF/reconnect источника OpenCV.
+Тесты покрывают геометрию точки опоры, уникальные track ID, подтверждение
+заполнения, recovery, cooldown, разрывы кадров, конфигурацию, Telegram и
+жизненный цикл асинхронной очереди.
 
 ```bash
-python -m unittest discover
+uv run python -m unittest discover
 ```

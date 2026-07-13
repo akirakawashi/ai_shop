@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 import httpx
@@ -23,7 +24,9 @@ class TelegramNotifierTest(unittest.IsolatedAsyncioTestCase):
         notifier = TelegramNotifier(
             bot_token="secret-token",
             chat_id="42",
+            alert_message="Откройте вторую кассу",
             api_base_url="https://telegram.test",
+            proxy_url=None,
             timeout_seconds=1.0,
             snapshot_filename="event.jpg",
             max_retries=0,
@@ -39,6 +42,9 @@ class TelegramNotifierTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(requests), 1)
         self.assertTrue(requests[0].url.path.endswith("/sendMessage"))
+        payload = json.loads(requests[0].content)
+        self.assertIn("Откройте вторую кассу", payload["text"])
+        self.assertIn("Людей в зоне: 1", payload["text"])
         self.assertNotIn("secret-token", "\n".join(captured_logs.output))
 
     async def test_error_does_not_expose_bot_token(self) -> None:
@@ -52,7 +58,9 @@ class TelegramNotifierTest(unittest.IsolatedAsyncioTestCase):
         notifier = TelegramNotifier(
             bot_token="top-secret-token",
             chat_id="42",
+            alert_message="Откройте вторую кассу",
             api_base_url="https://telegram.test",
+            proxy_url=None,
             timeout_seconds=1.0,
             snapshot_filename="event.jpg",
             max_retries=0,
@@ -82,7 +90,9 @@ class TelegramNotifierTest(unittest.IsolatedAsyncioTestCase):
         notifier = TelegramNotifier(
             bot_token="secret-token",
             chat_id="42",
+            alert_message="Откройте вторую кассу",
             api_base_url="https://telegram.test/proxy/",
+            proxy_url=None,
             timeout_seconds=1.0,
             snapshot_filename="event.jpg",
             max_retries=0,

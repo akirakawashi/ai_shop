@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from people_monitor.domain import (
-    BoundingBox,
-    RoiAreaRelation,
-    TrackedDetection,
-)
+from people_monitor.domain import BoundingBox, TrackedDetection
 from people_monitor.geometry import ConvexPolygonRoi
 
 
@@ -25,37 +21,34 @@ class ConvexPolygonRoiTest(unittest.TestCase):
     def detection(box: BoundingBox) -> TrackedDetection:
         return TrackedDetection(bbox=box, confidence=0.9, track_id=1)
 
-    def test_bbox_fully_inside(self) -> None:
-        evaluation = self.roi.evaluate(
-            self.detection(BoundingBox(30, 30, 60, 60)),
+    def test_bottom_center_inside_roi_is_counted_inside(self) -> None:
+        membership = self.roi.evaluate(
+            self.detection(BoundingBox(30, 10, 60, 60)),
             frame_width=100,
             frame_height=100,
         )
 
-        self.assertAlmostEqual(evaluation.inside_area, 900.0)
-        self.assertAlmostEqual(evaluation.outside_area, 0.0)
-        self.assertIs(evaluation.area_relation, RoiAreaRelation.INSIDE_LARGER)
+        self.assertEqual(membership.anchor_point, (45.0, 60))
+        self.assertTrue(membership.is_inside)
 
-    def test_exactly_half_outside_is_balanced(self) -> None:
-        evaluation = self.roi.evaluate(
-            self.detection(BoundingBox(5, 40, 45, 60)),
+    def test_bottom_center_outside_roi_is_not_counted(self) -> None:
+        membership = self.roi.evaluate(
+            self.detection(BoundingBox(0, 10, 20, 40)),
             frame_width=100,
             frame_height=100,
         )
 
-        self.assertAlmostEqual(evaluation.inside_area, evaluation.outside_area)
-        self.assertIs(evaluation.area_relation, RoiAreaRelation.BALANCED)
-        self.assertFalse(evaluation.is_outside_majority)
+        self.assertFalse(membership.is_inside)
 
-    def test_more_than_half_outside_is_outside_larger(self) -> None:
-        evaluation = self.roi.evaluate(
-            self.detection(BoundingBox(0, 40, 40, 60)),
-            frame_width=100,
-            frame_height=100,
+    def test_point_on_roi_boundary_is_counted_inside(self) -> None:
+        self.assertTrue(self.roi.contains((25.0, 50.0), 100, 100))
+
+    def test_clockwise_roi_is_normalized_and_supported(self) -> None:
+        clockwise = ConvexPolygonRoi(
+            ((0.25, 0.25), (0.25, 0.75), (0.75, 0.75), (0.75, 0.25))
         )
 
-        self.assertGreater(evaluation.outside_area, evaluation.inside_area)
-        self.assertIs(evaluation.area_relation, RoiAreaRelation.OUTSIDE_LARGER)
+        self.assertTrue(clockwise.contains((50.0, 50.0), 100, 100))
 
     def test_zero_area_bbox_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

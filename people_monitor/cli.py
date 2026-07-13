@@ -13,7 +13,7 @@ from people_monitor.config import AppConfig
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Уведомлять, когда площадь bbox снаружи ROI больше площади внутри."
+        description="Уведомлять, когда очередь заполняет заданную область интереса."
     )
     parser.add_argument(
         "--env-file",

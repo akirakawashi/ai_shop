@@ -11,9 +11,10 @@ class CocoClass(IntEnum):
     PERSON = 0
 
 
-class RoiAreaRelation(StrEnum):
-    """Отношение площадей bbox внутри и снаружи ROI."""
+class QueueState(StrEnum):
+    """Состояние заполненности очереди в области интереса."""
 
-    INSIDE_LARGER = "inside_larger"
-    BALANCED = "balanced"
-    OUTSIDE_LARGER = "outside_larger"
+    AVAILABLE = "available"
+    CONFIRMING_FULL = "confirming_full"
+    FULL = "full"
+    RECOVERING = "recovering"

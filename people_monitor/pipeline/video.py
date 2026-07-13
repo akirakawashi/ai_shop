@@ -13,8 +13,8 @@ import cv2
 
 from people_monitor.config import AppConfig
 from people_monitor.detection import PeopleTracker
-from people_monitor.domain import ExitEvent, Frame
-from people_monitor.events import BboxExitMonitor
+from people_monitor.domain import Frame, QueueFullEvent
+from people_monitor.events import QueueOccupancyMonitor
 from people_monitor.notifications import AsyncNotificationWorker
 from people_monitor.storage import EventStore
 from people_monitor.visualization import FrameRenderer
@@ -32,7 +32,7 @@ class VideoPipeline:
         self,
         settings: AppConfig,
         tracker: PeopleTracker,
-        monitor: BboxExitMonitor,
+        monitor: QueueOccupancyMonitor,
         renderer: FrameRenderer,
         frame_source: FrameSource,
         event_store: EventStore,
@@ -159,7 +159,11 @@ class VideoPipeline:
             self._frame_source.generation,
         )
 
-    def _publish_event(self, event: ExitEvent, snapshot: bytes | None) -> None:
+    def _publish_event(
+        self,
+        event: QueueFullEvent,
+        snapshot: bytes | None,
+    ) -> None:
         self._event_store.append(event)
         if snapshot is not None and self._settings.output.save_snapshots:
             self._save_snapshot(event, snapshot)
@@ -202,7 +206,7 @@ class VideoPipeline:
             raise RuntimeError(f"Не удалось создать выходное видео: {path}")
         return writer
 
-    def _save_snapshot(self, event: ExitEvent, snapshot: bytes) -> None:
+    def _save_snapshot(self, event: QueueFullEvent, snapshot: bytes) -> None:
         directory = self._settings.output.snapshots_dir
         directory.mkdir(parents=True, exist_ok=True)
         safe_camera_id = _UNSAFE_FILENAME_CHARS.sub(

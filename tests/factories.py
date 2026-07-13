@@ -5,21 +5,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from people_monitor.domain import BoundingBox, ExitEvent
+from people_monitor.domain import QueueFullEvent
 
 
-def make_event(track_id: int = 1) -> ExitEvent:
-    return ExitEvent(
+def make_event(people_count: int = 1) -> QueueFullEvent:
+    return QueueFullEvent(
         event_id=uuid4(),
-        schema_version=1,
+        schema_version=2,
         camera_id="test-camera",
-        track_id=track_id,
         frame_index=10,
         video_time_seconds=0.4,
         occurred_at=datetime.now(timezone.utc),
-        confidence=0.9,
-        bbox=BoundingBox(0, 0, 10, 10),
-        inside_area=40.0,
-        outside_area=60.0,
-        outside_ratio=0.6,
+        people_count=people_count,
+        capacity=1,
+        track_ids=tuple(range(1, people_count + 1)),
     )

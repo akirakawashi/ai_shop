@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final
 
-from people_monitor.domain import ExitEvent
+from people_monitor.domain import QueueFullEvent
 from people_monitor.notifications.base import Notifier
 
 _STOP: Final = object()
@@ -24,7 +24,7 @@ class _WorkerState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class _NotificationJob:
-    event: ExitEvent
+    event: QueueFullEvent
     snapshot: bytes | None
 
 
@@ -71,20 +71,20 @@ class AsyncNotificationWorker:
         self._consumer_task = consumer_task
         self._state = _WorkerState.RUNNING
 
-    def submit(self, event: ExitEvent, snapshot: bytes | None = None) -> bool:
+    def submit(self, event: QueueFullEvent, snapshot: bytes | None = None) -> bool:
         if self._state is not _WorkerState.RUNNING:
             self._logger.error(
-                "Worker не принимает события в состоянии %s; track_id=%s пропущен",
+                "Worker не принимает события в состоянии %s; event_id=%s пропущен",
                 self._state,
-                event.track_id,
+                event.event_id,
             )
             return False
         try:
             self._queue.put_nowait(_NotificationJob(event=event, snapshot=snapshot))
         except asyncio.QueueFull:
             self._logger.error(
-                "Очередь уведомлений переполнена; track_id=%s пропущен",
-                event.track_id,
+                "Очередь уведомлений переполнена; event_id=%s пропущен",
+                event.event_id,
             )
             return False
         return True

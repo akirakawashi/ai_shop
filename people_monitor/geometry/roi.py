@@ -1,4 +1,4 @@
-"""Площадь пересечения bbox с выпуклым полигоном ROI."""
+"""Быстрая проверка точки опоры человека внутри выпуклого ROI."""
 
 from __future__ import annotations
 
@@ -7,12 +7,7 @@ from dataclasses import dataclass
 from math import isclose, isfinite
 from typing import Final
 
-from people_monitor.domain import (
-    Point,
-    RoiAreaRelation,
-    RoiEvaluation,
-    TrackedDetection,
-)
+from people_monitor.domain import Point, RoiMembership, TrackedDetection
 
 _GEOMETRY_EPSILON: Final = 1e-9
 
@@ -29,10 +24,6 @@ def _signed_area(points: Sequence[Point]) -> float:
         x1 * y2 - x2 * y1
         for (x1, y1), (x2, y2) in zip(points, shifted_points, strict=True)
     )
-
-
-def _polygon_area(points: Sequence[Point]) -> float:
-    return abs(_signed_area(points)) if len(points) >= 3 else 0.0
 
 
 def _orientation(first: Point, second: Point, third: Point) -> int:
@@ -59,13 +50,10 @@ def _segments_intersect(
     second_start: Point,
     second_end: Point,
 ) -> bool:
-    orientations = (
-        _orientation(first_start, first_end, second_start),
-        _orientation(first_start, first_end, second_end),
-        _orientation(second_start, second_end, first_start),
-        _orientation(second_start, second_end, first_end),
-    )
-    first_a, first_b, second_a, second_b = orientations
+    first_a = _orientation(first_start, first_end, second_start)
+    first_b = _orientation(first_start, first_end, second_end)
+    second_a = _orientation(second_start, second_end, first_start)
+    second_b = _orientation(second_start, second_end, first_end)
     if first_a * first_b < 0 and second_a * second_b < 0:
         return True
     return (
@@ -88,9 +76,10 @@ def _validate_simple_polygon(points: Sequence[Point]) -> None:
                 second_index == first_index + 1
                 or (first_index == 0 and second_index == edge_count - 1)
             )
-            if are_adjacent:
-                continue
-            if _segments_intersect(*first_edge, *edges[second_index]):
+            if not are_adjacent and _segments_intersect(
+                *first_edge,
+                *edges[second_index],
+            ):
                 raise ValueError("Границы ROI не должны пересекаться")
 
 
@@ -102,12 +91,11 @@ def _validate_convex_polygon(points: Sequence[Point]) -> None:
         raise ValueError("ROI имеет нулевую площадь")
 
     turn_directions: list[bool] = []
-    point_count = len(points)
-    for index in range(point_count):
+    for index in range(len(points)):
         turn = _cross(
             points[index],
-            points[(index + 1) % point_count],
-            points[(index + 2) % point_count],
+            points[(index + 1) % len(points)],
+            points[(index + 2) % len(points)],
         )
         if not isclose(turn, 0.0, abs_tol=_GEOMETRY_EPSILON):
             turn_directions.append(turn > 0)
@@ -117,64 +105,9 @@ def _validate_convex_polygon(points: Sequence[Point]) -> None:
         raise ValueError("ROI должен быть выпуклым полигоном")
 
 
-def _line_intersection(
-    start: Point,
-    end: Point,
-    edge_start: Point,
-    edge_end: Point,
-) -> Point:
-    segment = (end[0] - start[0], end[1] - start[1])
-    edge = (edge_end[0] - edge_start[0], edge_end[1] - edge_start[1])
-    denominator = segment[0] * edge[1] - segment[1] * edge[0]
-    if isclose(denominator, 0.0, abs_tol=_GEOMETRY_EPSILON):
-        return end
-    offset = (edge_start[0] - start[0], edge_start[1] - start[1])
-    factor = (offset[0] * edge[1] - offset[1] * edge[0]) / denominator
-    return (start[0] + factor * segment[0], start[1] + factor * segment[1])
-
-
-def _clip_by_convex_polygon(
-    subject: Sequence[Point],
-    clip: Sequence[Point],
-) -> list[Point]:
-    """Вернуть пересечение полигонов алгоритмом Sutherland–Hodgman."""
-    output = list(subject)
-    clip_edges = zip(clip, (*clip[1:], clip[0]), strict=True)
-    for edge_start, edge_end in clip_edges:
-        if not output:
-            break
-        input_points = output
-        output = []
-        start = input_points[-1]
-        for end in input_points:
-            end_inside = _cross(edge_start, edge_end, end) >= -_GEOMETRY_EPSILON
-            start_inside = _cross(edge_start, edge_end, start) >= -_GEOMETRY_EPSILON
-            if end_inside:
-                if not start_inside:
-                    output.append(_line_intersection(start, end, edge_start, edge_end))
-                output.append(end)
-            elif start_inside:
-                output.append(_line_intersection(start, end, edge_start, edge_end))
-            start = end
-    return output
-
-
-def _area_relation(inside_area: float, outside_area: float) -> RoiAreaRelation:
-    if isclose(
-        inside_area,
-        outside_area,
-        rel_tol=_GEOMETRY_EPSILON,
-        abs_tol=_GEOMETRY_EPSILON,
-    ):
-        return RoiAreaRelation.BALANCED
-    if outside_area > inside_area:
-        return RoiAreaRelation.OUTSIDE_LARGER
-    return RoiAreaRelation.INSIDE_LARGER
-
-
 @dataclass(frozen=True, slots=True)
 class ConvexPolygonRoi:
-    """Выпуклый ROI с координатами относительно ширины и высоты кадра."""
+    """Выпуклый ROI в нормализованных координатах кадра."""
 
     normalized_points: tuple[Point, ...]
 
@@ -200,33 +133,36 @@ class ConvexPolygonRoi:
             (x * frame_width, y * frame_height) for x, y in self.normalized_points
         )
 
+    def contains(
+        self,
+        point: Point,
+        frame_width: int,
+        frame_height: int,
+    ) -> bool:
+        """Вернуть True для точки внутри ROI или непосредственно на границе."""
+        if not all(isfinite(coordinate) for coordinate in point):
+            raise ValueError("Координаты проверяемой точки должны быть конечными")
+        pixel_points = self.pixel_points(frame_width, frame_height)
+        edges = zip(
+            pixel_points,
+            (*pixel_points[1:], pixel_points[0]),
+            strict=True,
+        )
+        return all(
+            _cross(edge_start, edge_end, point) >= -_GEOMETRY_EPSILON
+            for edge_start, edge_end in edges
+        )
+
     def evaluate(
         self,
         detection: TrackedDetection,
         frame_width: int,
         frame_height: int,
-    ) -> RoiEvaluation:
-        bbox = detection.bbox
-        bbox_polygon: tuple[Point, ...] = (
-            (bbox.x1, bbox.y1),
-            (bbox.x2, bbox.y1),
-            (bbox.x2, bbox.y2),
-            (bbox.x1, bbox.y2),
-        )
-        intersection = _clip_by_convex_polygon(
-            bbox_polygon,
-            self.pixel_points(frame_width, frame_height),
-        )
-        bbox_area = bbox.area
-        inside_area = min(bbox_area, max(0.0, _polygon_area(intersection)))
-        outside_area = max(0.0, bbox_area - inside_area)
-
-        return RoiEvaluation(
+    ) -> RoiMembership:
+        """Определить принадлежность человека по нижнему центру bbox."""
+        anchor_point = detection.bbox.bottom_center
+        return RoiMembership(
             detection=detection,
-            bbox_area=bbox_area,
-            inside_area=inside_area,
-            outside_area=outside_area,
-            inside_ratio=inside_area / bbox_area,
-            outside_ratio=outside_area / bbox_area,
-            area_relation=_area_relation(inside_area, outside_area),
+            anchor_point=anchor_point,
+            is_inside=self.contains(anchor_point, frame_width, frame_height),
         )

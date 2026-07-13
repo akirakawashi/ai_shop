@@ -17,6 +17,33 @@ from people_monitor.config._base import (
 )
 
 
+def _validate_template(
+    value: str,
+    allowed_fields: set[str],
+    example_values: dict[str, object],
+    field_name: str,
+) -> str:
+    parsed_fields = tuple(Formatter().parse(value))
+    used_fields = {
+        parsed_field
+        for _, parsed_field, _, _ in parsed_fields
+        if parsed_field is not None
+    }
+    if not used_fields <= allowed_fields:
+        supported = ", ".join(sorted(allowed_fields))
+        raise ValueError(f"{field_name} поддерживает только: {supported}")
+    if any(
+        "{" in format_spec or "}" in format_spec
+        for _, _, format_spec, _ in parsed_fields
+    ):
+        raise ValueError(f"Вложенные поля формата в {field_name} запрещены")
+    try:
+        value.format(**example_values)
+    except (AttributeError, IndexError, KeyError, ValueError) as error:
+        raise ValueError(f"Некорректный {field_name}") from error
+    return value
+
+
 class VisualizationConfig(_BaseConfig):
     """Цвета, размеры и шаблоны подписей OpenCV."""
 
@@ -28,15 +55,11 @@ class VisualizationConfig(_BaseConfig):
     )
     inside_color: BgrColor = Field(
         default=(0, 190, 0),
-        description="BGR-цвет bbox преимущественно внутри ROI",
+        description="BGR-цвет bbox с точкой опоры внутри ROI",
     )
     outside_color: BgrColor = Field(
-        default=(0, 0, 255),
-        description="BGR-цвет bbox преимущественно снаружи ROI",
-    )
-    balanced_color: BgrColor = Field(
-        default=(255, 180, 0),
-        description="BGR-цвет bbox на равной границе площадей",
+        default=(128, 128, 128),
+        description="BGR-цвет bbox с точкой опоры снаружи ROI",
     )
     roi_thickness: PositiveInt = Field(
         default=2,
@@ -70,43 +93,49 @@ class VisualizationConfig(_BaseConfig):
         default=20,
         description="Минимальная координата Y подписи",
     )
-    roi_label: NonBlankString = Field(
-        default="ROI",
-        description="Текст подписи области интереса",
+    roi_label_template: str = Field(
+        default="QUEUE {people_count}/{capacity} | {queue_state}",
+        min_length=1,
+        description="Шаблон подписи заполненности ROI",
     )
     unknown_track_label: NonBlankString = Field(
         default="?",
         description="Подпись детекции без track_id",
     )
+    inside_state_label: NonBlankString = Field(
+        default="IN",
+        description="Подпись bbox с точкой опоры внутри ROI",
+    )
+    outside_state_label: NonBlankString = Field(
+        default="OUT",
+        description="Подпись bbox с точкой опоры снаружи ROI",
+    )
     bbox_label_template: str = Field(
-        default="ID {track_id} | OUT {outside_ratio:.0%}",
+        default="ID {track_id} | {roi_state}",
         min_length=1,
         description="Шаблон подписи bbox",
     )
 
+    @field_validator("roi_label_template")
+    @classmethod
+    def validate_roi_label_template(cls, value: str) -> str:
+        return _validate_template(
+            value=value,
+            allowed_fields={"people_count", "capacity", "queue_state"},
+            example_values={
+                "people_count": 1,
+                "capacity": 1,
+                "queue_state": "full",
+            },
+            field_name="roi_label_template",
+        )
+
     @field_validator("bbox_label_template")
     @classmethod
     def validate_bbox_label_template(cls, value: str) -> str:
-        allowed_fields = {"track_id", "outside_ratio"}
-        parsed_fields = tuple(Formatter().parse(value))
-        used_fields = {
-            field_name
-            for _, field_name, _, _ in parsed_fields
-            if field_name is not None
-        }
-        if not used_fields <= allowed_fields:
-            raise ValueError(
-                "bbox_label_template поддерживает только track_id и outside_ratio"
-            )
-        if any(
-            "{" in format_spec or "}" in format_spec
-            for _, _, format_spec, _ in parsed_fields
-        ):
-            raise ValueError("Вложенные поля формата в bbox_label_template запрещены")
-        try:
-            value.format(track_id="1", outside_ratio=0.5)
-        except (AttributeError, IndexError, KeyError, ValueError) as error:
-            raise ValueError(
-                "bbox_label_template поддерживает только track_id и outside_ratio"
-            ) from error
-        return value
+        return _validate_template(
+            value=value,
+            allowed_fields={"track_id", "roi_state"},
+            example_values={"track_id": "1", "roi_state": "IN"},
+            field_name="bbox_label_template",
+        )

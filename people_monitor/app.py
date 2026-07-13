@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from people_monitor.config import AppConfig
 from people_monitor.detection import UltralyticsPeopleTracker
-from people_monitor.events import BboxExitMonitor
+from people_monitor.events import QueueOccupancyMonitor
 from people_monitor.geometry import ConvexPolygonRoi
 from people_monitor.notifications import (
     AsyncNotificationWorker,
@@ -53,7 +53,7 @@ async def run(settings: AppConfig, dry_run: bool = False) -> None:
             device=settings.model.device,
             verbose=settings.model.verbose,
         )
-        monitor = BboxExitMonitor(
+        monitor = QueueOccupancyMonitor(
             camera_id=settings.camera.id,
             roi=roi,
             settings=settings.event,
@@ -87,7 +87,12 @@ async def run(settings: AppConfig, dry_run: bool = False) -> None:
 def _build_notifier(settings: AppConfig, dry_run: bool) -> _NotifierBinding:
     telegram = settings.telegram
     if dry_run or not telegram.enabled:
-        return _NotifierBinding(notifier=LoggingNotifier(), include_snapshot=False)
+        return _NotifierBinding(
+            notifier=LoggingNotifier(
+                alert_message=settings.notification.alert_message,
+            ),
+            include_snapshot=False,
+        )
 
     if telegram.bot_token is None or telegram.chat_id is None:
         raise RuntimeError(
@@ -97,7 +102,13 @@ def _build_notifier(settings: AppConfig, dry_run: bool) -> _NotifierBinding:
     notifier = TelegramNotifier(
         bot_token=telegram.bot_token.get_secret_value(),
         chat_id=telegram.chat_id,
+        alert_message=settings.notification.alert_message,
         api_base_url=str(telegram.api_base_url),
+        proxy_url=(
+            telegram.proxy_url.get_secret_value()
+            if telegram.proxy_url is not None
+            else None
+        ),
         timeout_seconds=telegram.timeout_seconds,
         snapshot_filename=telegram.snapshot_filename,
         max_retries=telegram.max_retries,

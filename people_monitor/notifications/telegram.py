@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from people_monitor.domain import ExitEvent
+from people_monitor.domain import QueueFullEvent
 from people_monitor.notifications.base import Notifier, format_event_message
 
 _JPEG_CONTENT_TYPE: Final = "image/jpeg"
@@ -26,7 +26,7 @@ _REDACTED_SECRET: Final = "[REDACTED]"
 
 
 class NotificationError(RuntimeError):
-    """Ошибка доставки, безопасная для логирования без раскрытия токена."""
+    """Ошибка доставки без раскрытия токена и proxy credentials."""
 
 
 class _TelegramMethod(StrEnum):
@@ -35,11 +35,11 @@ class _TelegramMethod(StrEnum):
 
 
 class _SecretRedactingFilter(logging.Filter):
-    """Удаляет bot token даже из внутренних HTTPX LogRecord."""
+    """Удаляет bot token и proxy URL из внутренних HTTPX LogRecord."""
 
-    def __init__(self, secret: str) -> None:
+    def __init__(self, secrets: tuple[str, ...]) -> None:
         super().__init__()
-        self._secret = secret
+        self._secrets = tuple(secret for secret in secrets if secret)
 
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = self._redact(record.msg)
@@ -53,9 +53,10 @@ class _SecretRedactingFilter(logging.Filter):
 
     def _redact(self, value: object) -> object:
         rendered = str(value)
-        if self._secret not in rendered:
-            return value
-        return rendered.replace(self._secret, _REDACTED_SECRET)
+        redacted = rendered
+        for secret in self._secrets:
+            redacted = redacted.replace(secret, _REDACTED_SECRET)
+        return value if redacted == rendered else redacted
 
 
 class TelegramNotifier(Notifier):
@@ -63,7 +64,9 @@ class TelegramNotifier(Notifier):
         self,
         bot_token: str,
         chat_id: str,
+        alert_message: str,
         api_base_url: str,
+        proxy_url: str | None,
         timeout_seconds: float,
         snapshot_filename: str,
         max_retries: int,
@@ -72,11 +75,24 @@ class TelegramNotifier(Notifier):
     ) -> None:
         if not bot_token or not chat_id:
             raise ValueError("Для Telegram нужны непустые bot_token и chat_id")
+        if not alert_message.strip():
+            raise ValueError("alert_message не может быть пустым")
         parsed_api_url = urlparse(api_base_url)
         if parsed_api_url.scheme.lower() != "https":
             raise ValueError("Telegram API URL должен использовать HTTPS")
         if parsed_api_url.query or parsed_api_url.fragment:
             raise ValueError("Telegram API URL не должен содержать query или fragment")
+        if proxy_url is not None:
+            parsed_proxy_url = urlparse(proxy_url)
+            if (
+                parsed_proxy_url.scheme.lower() != "http"
+                or not parsed_proxy_url.hostname
+            ):
+                raise ValueError("Telegram proxy должен быть корректным HTTP URL")
+            if parsed_proxy_url.query or parsed_proxy_url.fragment:
+                raise ValueError(
+                    "Telegram proxy не должен содержать query или fragment"
+                )
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds должен быть положительным")
         if max_retries < 0:
@@ -85,10 +101,13 @@ class TelegramNotifier(Notifier):
             raise ValueError("retry_backoff_seconds не может быть отрицательным")
         self._bot_token = bot_token
         self._chat_id = chat_id
+        self._alert_message = alert_message.strip()
         self._snapshot_filename = snapshot_filename
         self._max_retries = max_retries
         self._retry_backoff_seconds = retry_backoff_seconds
-        self._redacting_filter = _SecretRedactingFilter(bot_token)
+        self._redacting_filter = _SecretRedactingFilter(
+            (bot_token, proxy_url or ""),
+        )
         self._http_loggers = tuple(
             logging.getLogger(name) for name in _HTTP_LOGGER_NAMES
         )
@@ -97,11 +116,16 @@ class TelegramNotifier(Notifier):
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             base_url=f"{api_base_url.rstrip('/')}/",
+            proxy=proxy_url,
             timeout=timeout_seconds,
         )
 
-    async def send(self, event: ExitEvent, snapshot: bytes | None = None) -> None:
-        message = format_event_message(event)
+    async def send(
+        self,
+        event: QueueFullEvent,
+        snapshot: bytes | None = None,
+    ) -> None:
+        message = format_event_message(event, self._alert_message)
         if snapshot is None:
             await self._request(
                 method=_TelegramMethod.SEND_MESSAGE,

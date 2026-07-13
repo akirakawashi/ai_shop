@@ -1,10 +1,8 @@
-"""Конфигурация автомата событий выхода."""
+"""Конфигурация автомата заполненности очереди."""
 
 from __future__ import annotations
 
-from typing import Self
-
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
 from people_monitor.config._base import (
@@ -15,32 +13,23 @@ from people_monitor.config._base import (
 
 
 class EventConfig(_BaseConfig):
-    """Пороговые параметры подтверждения переходов bbox."""
+    """Вместимость ROI и параметры устойчивого формирования события."""
 
     model_config = SettingsConfigDict(env_prefix="EVENT_")
 
-    outside_confirm_frames: PositiveInt = Field(
+    roi_capacity: PositiveInt = Field(
         default=5,
-        description="Кадры подряд с преобладанием внешней площади",
+        description="Количество людей, при котором ROI считается заполненной",
     )
-    inside_confirm_frames: PositiveInt = Field(
-        default=3,
-        description="Кадры подряд для подтверждения нахождения внутри ROI",
+    full_confirm_frames: PositiveInt = Field(
+        default=5,
+        description="Кадры подряд на вместимости для подтверждения заполнения",
+    )
+    recovery_confirm_frames: PositiveInt = Field(
+        default=10,
+        description="Кадры подряд ниже вместимости для повторного взведения",
     )
     cooldown_seconds: NonNegativeFloat = Field(
-        default=30.0,
-        description="Минимальный интервал между повторными событиями трека",
+        default=60.0,
+        description="Минимальный интервал между уведомлениями одной ROI",
     )
-    track_ttl_frames: PositiveInt = Field(
-        default=150,
-        description="Срок хранения состояния пропавшего track_id в кадрах",
-    )
-
-    @model_validator(mode="after")
-    def validate_track_ttl(self) -> Self:
-        required_ttl = max(self.outside_confirm_frames, self.inside_confirm_frames)
-        if self.track_ttl_frames < required_ttl:
-            raise ValueError(
-                "track_ttl_frames не может быть меньше количества кадров подтверждения"
-            )
-        return self

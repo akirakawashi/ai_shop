@@ -1,11 +1,12 @@
 [project]
 name = "ai-shop"
 version = "0.1.0"
-description = "People bbox exit monitoring for configurable video ROI"
+description = "Real-time queue occupancy monitoring for configurable video ROI"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "httpx>=0.28.1,<1.0.0",
+    "lap>=0.5.13",
     "numpy>=2.0.0",
     "opencv-python>=4.10.0",
     "pydantic>=2.10.0,<3.0.0",

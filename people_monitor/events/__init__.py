@@ -1,5 +1,5 @@
-"""Правила формирования событий."""
+"""Правила формирования событий заполнения очереди."""
 
-from people_monitor.events.exit_monitor import BboxExitMonitor
+from people_monitor.events.occupancy_monitor import QueueOccupancyMonitor
 
-__all__ = ["BboxExitMonitor"]
+__all__ = ["QueueOccupancyMonitor"]

@@ -3,18 +3,22 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from people_monitor.domain import ExitEvent
+from people_monitor.domain import QueueFullEvent
 from people_monitor.notifications import AsyncNotificationWorker, Notifier
 from tests.factories import make_event
 
 
 class _RecordingNotifier(Notifier):
     def __init__(self) -> None:
-        self.events: list[ExitEvent] = []
+        self.events: list[QueueFullEvent] = []
         self.closed = False
         self.close_calls = 0
 
-    async def send(self, event: ExitEvent, snapshot: bytes | None = None) -> None:
+    async def send(
+        self,
+        event: QueueFullEvent,
+        snapshot: bytes | None = None,
+    ) -> None:
         self.events.append(event)
 
     async def close(self) -> None:
@@ -27,7 +31,11 @@ class _BlockingNotifier(_RecordingNotifier):
         super().__init__()
         self.send_started = asyncio.Event()
 
-    async def send(self, event: ExitEvent, snapshot: bytes | None = None) -> None:
+    async def send(
+        self,
+        event: QueueFullEvent,
+        snapshot: bytes | None = None,
+    ) -> None:
         self.send_started.set()
         await asyncio.Event().wait()
 
@@ -53,7 +61,7 @@ class AsyncNotificationWorkerTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(worker.submit(make_event(2)))
         await worker.close()
 
-        self.assertEqual([event.track_id for event in notifier.events], [1, 2])
+        self.assertEqual([event.people_count for event in notifier.events], [1, 2])
         self.assertTrue(notifier.closed)
 
     async def test_closed_worker_rejects_new_jobs_and_cannot_restart(self) -> None:

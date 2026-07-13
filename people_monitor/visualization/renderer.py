@@ -1,4 +1,4 @@
-"""Отрисовка ROI, bbox, track_id и соотношения площадей."""
+"""Отрисовка ROI, заполненности очереди, bbox и track_id."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from typing import Final
 import cv2
 import numpy as np
 
-from people_monitor.config import BgrColor, VisualizationConfig
-from people_monitor.domain import Frame, FrameAnalysis, RoiAreaRelation, RoiEvaluation
+from people_monitor.config import VisualizationConfig
+from people_monitor.domain import Frame, FrameAnalysis, RoiMembership
 from people_monitor.geometry import ConvexPolygonRoi
 
 _FONT_FACE: Final = cv2.FONT_HERSHEY_SIMPLEX
@@ -39,7 +39,11 @@ class FrameRenderer:
         )
         cv2.putText(
             frame,
-            self._settings.roi_label,
+            self._settings.roi_label_template.format(
+                people_count=analysis.people_count,
+                capacity=analysis.capacity,
+                queue_state=analysis.queue_state.value,
+            ),
             tuple(roi_points[0][0]),
             _FONT_FACE,
             self._settings.roi_font_scale,
@@ -48,9 +52,13 @@ class FrameRenderer:
             _LINE_TYPE,
         )
 
-        event_track_ids = {event.track_id for event in analysis.events}
-        for evaluation in analysis.evaluations:
-            self._draw_evaluation(frame, evaluation, event_track_ids)
+        event_track_ids = {
+            track_id
+            for event in analysis.events
+            for track_id in event.track_ids
+        }
+        for membership in analysis.memberships:
+            self._draw_membership(frame, membership, event_track_ids)
         return frame
 
     def encode_jpeg(self, frame: Frame, extension: str, quality: int) -> bytes:
@@ -63,17 +71,21 @@ class FrameRenderer:
             raise RuntimeError(f"Не удалось закодировать кадр в {extension}")
         return encoded.tobytes()
 
-    def _draw_evaluation(
+    def _draw_membership(
         self,
         frame: Frame,
-        evaluation: RoiEvaluation,
+        membership: RoiMembership,
         event_track_ids: set[int],
     ) -> None:
-        detection = evaluation.detection
+        detection = membership.detection
         bbox = detection.bbox
         track_id = detection.track_id
         is_event = track_id in event_track_ids
-        color = self._color_for(evaluation.area_relation)
+        color = (
+            self._settings.inside_color
+            if membership.is_inside
+            else self._settings.outside_color
+        )
         thickness = (
             self._settings.event_bbox_thickness
             if is_event
@@ -93,7 +105,11 @@ class FrameRenderer:
         )
         label = self._settings.bbox_label_template.format(
             track_id=identity,
-            outside_ratio=evaluation.outside_ratio,
+            roi_state=(
+                self._settings.inside_state_label
+                if membership.is_inside
+                else self._settings.outside_state_label
+            ),
         )
         cv2.putText(
             frame,
@@ -111,10 +127,3 @@ class FrameRenderer:
             self._settings.text_thickness,
             _LINE_TYPE,
         )
-
-    def _color_for(self, relation: RoiAreaRelation) -> BgrColor:
-        if relation is RoiAreaRelation.OUTSIDE_LARGER:
-            return self._settings.outside_color
-        if relation is RoiAreaRelation.BALANCED:
-            return self._settings.balanced_color
-        return self._settings.inside_color

@@ -8,7 +8,8 @@ from math import isfinite
 from typing import Any
 from uuid import UUID
 
-from people_monitor.domain.enums import RoiAreaRelation
+from people_monitor.domain.enums import QueueState
+from people_monitor.domain.types import Point
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +40,11 @@ class BoundingBox:
     def area(self) -> float:
         return self.width * self.height
 
+    @property
+    def bottom_center(self) -> Point:
+        """Точка опоры человека: середина нижней стороны bbox."""
+        return ((self.x1 + self.x2) / 2.0, self.y2)
+
 
 @dataclass(frozen=True, slots=True)
 class TrackedDetection:
@@ -56,38 +62,39 @@ class TrackedDetection:
 
 
 @dataclass(frozen=True, slots=True)
-class RoiEvaluation:
-    """Результат сравнения площади bbox с ROI."""
+class RoiMembership:
+    """Принадлежность точки опоры детекции области интереса."""
 
     detection: TrackedDetection
-    bbox_area: float
-    inside_area: float
-    outside_area: float
-    inside_ratio: float
-    outside_ratio: float
-    area_relation: RoiAreaRelation
-
-    @property
-    def is_outside_majority(self) -> bool:
-        return self.area_relation is RoiAreaRelation.OUTSIDE_LARGER
+    anchor_point: Point
+    is_inside: bool
 
 
 @dataclass(frozen=True, slots=True)
-class ExitEvent:
-    """Подтверждённый выход одного отслеживаемого человека из ROI."""
+class QueueFullEvent:
+    """Подтверждённое заполнение очереди в ROI."""
 
     event_id: UUID
     schema_version: int
     camera_id: str
-    track_id: int
     frame_index: int
     video_time_seconds: float
     occurred_at: datetime
-    confidence: float
-    bbox: BoundingBox
-    inside_area: float
-    outside_area: float
-    outside_ratio: float
+    people_count: int
+    capacity: int
+    track_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if self.capacity <= 0:
+            raise ValueError("Вместимость ROI должна быть положительной")
+        if self.people_count < self.capacity:
+            raise ValueError("Событие возможно только при заполненной ROI")
+        if self.people_count != len(self.track_ids):
+            raise ValueError("people_count должен совпадать с количеством track_ids")
+        if len(set(self.track_ids)) != len(self.track_ids):
+            raise ValueError("track_ids события не должны повторяться")
+        if any(track_id < 0 for track_id in self.track_ids):
+            raise ValueError("track_id не может быть отрицательным")
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -100,5 +107,8 @@ class ExitEvent:
 class FrameAnalysis:
     """Полный результат анализа одного кадра."""
 
-    evaluations: tuple[RoiEvaluation, ...]
-    events: tuple[ExitEvent, ...]
+    memberships: tuple[RoiMembership, ...]
+    events: tuple[QueueFullEvent, ...]
+    people_count: int
+    capacity: int
+    queue_state: QueueState
