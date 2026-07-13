@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import unittest
+
+from people_monitor.domain import (
+    BoundingBox,
+    RoiAreaRelation,
+    TrackedDetection,
+)
+from people_monitor.geometry import ConvexPolygonRoi
+
+
+class ConvexPolygonRoiTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.roi = ConvexPolygonRoi(
+            normalized_points=(
+                (0.25, 0.25),
+                (0.75, 0.25),
+                (0.75, 0.75),
+                (0.25, 0.75),
+            )
+        )
+
+    @staticmethod
+    def detection(box: BoundingBox) -> TrackedDetection:
+        return TrackedDetection(bbox=box, confidence=0.9, track_id=1)
+
+    def test_bbox_fully_inside(self) -> None:
+        evaluation = self.roi.evaluate(
+            self.detection(BoundingBox(30, 30, 60, 60)),
+            frame_width=100,
+            frame_height=100,
+        )
+
+        self.assertAlmostEqual(evaluation.inside_area, 900.0)
+        self.assertAlmostEqual(evaluation.outside_area, 0.0)
+        self.assertIs(evaluation.area_relation, RoiAreaRelation.INSIDE_LARGER)
+
+    def test_exactly_half_outside_is_balanced(self) -> None:
+        evaluation = self.roi.evaluate(
+            self.detection(BoundingBox(5, 40, 45, 60)),
+            frame_width=100,
+            frame_height=100,
+        )
+
+        self.assertAlmostEqual(evaluation.inside_area, evaluation.outside_area)
+        self.assertIs(evaluation.area_relation, RoiAreaRelation.BALANCED)
+        self.assertFalse(evaluation.is_outside_majority)
+
+    def test_more_than_half_outside_is_outside_larger(self) -> None:
+        evaluation = self.roi.evaluate(
+            self.detection(BoundingBox(0, 40, 40, 60)),
+            frame_width=100,
+            frame_height=100,
+        )
+
+        self.assertGreater(evaluation.outside_area, evaluation.inside_area)
+        self.assertIs(evaluation.area_relation, RoiAreaRelation.OUTSIDE_LARGER)
+
+    def test_zero_area_bbox_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            BoundingBox(10, 10, 10, 20)
+
+    def test_repeated_roi_vertex_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            ConvexPolygonRoi(((0.1, 0.1), (0.9, 0.1), (0.9, 0.1), (0.1, 0.9)))
+
+    def test_concave_roi_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            ConvexPolygonRoi(
+                ((0.1, 0.1), (0.9, 0.1), (0.5, 0.5), (0.9, 0.9), (0.1, 0.9))
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
