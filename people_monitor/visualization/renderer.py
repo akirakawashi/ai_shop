@@ -83,7 +83,7 @@ class FrameRenderer:
         is_event = track_id in event_track_ids
         color = (
             self._settings.inside_color
-            if membership.is_inside
+            if membership.intersects_roi
             else self._settings.outside_color
         )
         thickness = (
@@ -107,7 +107,7 @@ class FrameRenderer:
             track_id=identity,
             roi_state=(
                 self._settings.inside_state_label
-                if membership.is_inside
+                if membership.intersects_roi
                 else self._settings.outside_state_label
             ),
         )

@@ -73,7 +73,7 @@ class QueueOccupancyMonitor:
             )
             for detection in self._unique_detections(detections)
         )
-        track_ids = self._inside_track_ids(memberships)
+        track_ids = self._overlapping_track_ids(memberships)
         people_count = len(track_ids)
 
         event = self._advance_state(
@@ -124,14 +124,14 @@ class QueueOccupancyMonitor:
         return (*selected.values(), *untracked)
 
     @staticmethod
-    def _inside_track_ids(
+    def _overlapping_track_ids(
         memberships: tuple[RoiMembership, ...],
     ) -> tuple[int, ...]:
         return tuple(
             sorted(
                 membership.detection.track_id
                 for membership in memberships
-                if membership.is_inside
+                if membership.intersects_roi
                 and membership.detection.track_id is not None
             )
         )

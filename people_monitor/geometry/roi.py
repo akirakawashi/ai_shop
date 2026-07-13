@@ -1,4 +1,4 @@
-"""Быстрая проверка точки опоры человека внутри выпуклого ROI."""
+"""Быстрая проверка пересечения bbox с выпуклым ROI."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from math import isclose, isfinite
 from typing import Final
 
-from people_monitor.domain import Point, RoiMembership, TrackedDetection
+from people_monitor.domain import BoundingBox, Point, RoiMembership, TrackedDetection
 
 _GEOMETRY_EPSILON: Final = 1e-9
 
@@ -64,11 +64,22 @@ def _segments_intersect(
     )
 
 
+def _polygon_edges(points: Sequence[Point]) -> tuple[tuple[Point, Point], ...]:
+    return tuple(zip(points, (*points[1:], points[0]), strict=True))
+
+
+def _contains_convex_polygon(point: Point, polygon: Sequence[Point]) -> bool:
+    return all(
+        _cross(edge_start, edge_end, point) >= -_GEOMETRY_EPSILON
+        for edge_start, edge_end in _polygon_edges(polygon)
+    )
+
+
 def _validate_simple_polygon(points: Sequence[Point]) -> None:
     if len(set(points)) != len(points):
         raise ValueError("ROI не должен содержать повторяющиеся вершины")
 
-    edges = tuple(zip(points, (*points[1:], points[0]), strict=True))
+    edges = _polygon_edges(points)
     edge_count = len(edges)
     for first_index, first_edge in enumerate(edges):
         for second_index in range(first_index + 1, edge_count):
@@ -142,15 +153,38 @@ class ConvexPolygonRoi:
         """Вернуть True для точки внутри ROI или непосредственно на границе."""
         if not all(isfinite(coordinate) for coordinate in point):
             raise ValueError("Координаты проверяемой точки должны быть конечными")
-        pixel_points = self.pixel_points(frame_width, frame_height)
-        edges = zip(
-            pixel_points,
-            (*pixel_points[1:], pixel_points[0]),
-            strict=True,
+        return _contains_convex_polygon(
+            point,
+            self.pixel_points(frame_width, frame_height),
         )
-        return all(
-            _cross(edge_start, edge_end, point) >= -_GEOMETRY_EPSILON
-            for edge_start, edge_end in edges
+
+    def intersects_bbox(
+        self,
+        bbox: BoundingBox,
+        frame_width: int,
+        frame_height: int,
+    ) -> bool:
+        """Вернуть True, если bbox касается ROI или пересекает его."""
+        roi_points = self.pixel_points(frame_width, frame_height)
+        bbox_points: tuple[Point, ...] = (
+            (bbox.x1, bbox.y1),
+            (bbox.x2, bbox.y1),
+            (bbox.x2, bbox.y2),
+            (bbox.x1, bbox.y2),
+        )
+        if any(
+            _contains_convex_polygon(point, roi_points) for point in bbox_points
+        ):
+            return True
+        if any(
+            bbox.x1 <= x <= bbox.x2 and bbox.y1 <= y <= bbox.y2
+            for x, y in roi_points
+        ):
+            return True
+        return any(
+            _segments_intersect(*bbox_edge, *roi_edge)
+            for bbox_edge in _polygon_edges(bbox_points)
+            for roi_edge in _polygon_edges(roi_points)
         )
 
     def evaluate(
@@ -159,10 +193,12 @@ class ConvexPolygonRoi:
         frame_width: int,
         frame_height: int,
     ) -> RoiMembership:
-        """Определить принадлежность человека по нижнему центру bbox."""
-        anchor_point = detection.bbox.bottom_center
+        """Определить, пересекает ли bbox человека область интереса."""
         return RoiMembership(
             detection=detection,
-            anchor_point=anchor_point,
-            is_inside=self.contains(anchor_point, frame_width, frame_height),
+            intersects_roi=self.intersects_bbox(
+                detection.bbox,
+                frame_width,
+                frame_height,
+            ),
         )

@@ -147,19 +147,19 @@ class QueueOccupancyMonitorTest(unittest.TestCase):
         )
 
         self.assertEqual(len(result.memberships), 1)
-        self.assertTrue(result.memberships[0].is_inside)
+        self.assertTrue(result.memberships[0].intersects_roi)
         self.assertEqual(result.people_count, 0)
         self.assertFalse(result.events)
 
-    def test_bbox_is_counted_by_bottom_center_not_entire_area(self) -> None:
-        mostly_outside = BoundingBox(0, 0, 60, 50)
+    def test_small_bbox_overlap_is_enough_for_test_mode(self) -> None:
+        mostly_outside = BoundingBox(0, 0, 30, 30)
         result = self.analyze(
             self.monitor,
             (self.detection(mostly_outside, 7),),
             0,
         )
 
-        self.assertTrue(result.memberships[0].is_inside)
+        self.assertTrue(result.memberships[0].intersects_roi)
         self.assertEqual(result.people_count, 1)
 
     def test_frame_gap_resets_unfinished_confirmation(self) -> None:

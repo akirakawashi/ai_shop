@@ -9,7 +9,6 @@ from typing import Any
 from uuid import UUID
 
 from people_monitor.domain.enums import QueueState
-from people_monitor.domain.types import Point
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,12 +39,6 @@ class BoundingBox:
     def area(self) -> float:
         return self.width * self.height
 
-    @property
-    def bottom_center(self) -> Point:
-        """Точка опоры человека: середина нижней стороны bbox."""
-        return ((self.x1 + self.x2) / 2.0, self.y2)
-
-
 @dataclass(frozen=True, slots=True)
 class TrackedDetection:
     """Детекция человека с идентификатором трека."""
@@ -63,11 +56,10 @@ class TrackedDetection:
 
 @dataclass(frozen=True, slots=True)
 class RoiMembership:
-    """Принадлежность точки опоры детекции области интереса."""
+    """Результат проверки пересечения bbox с областью интереса."""
 
     detection: TrackedDetection
-    anchor_point: Point
-    is_inside: bool
+    intersects_roi: bool
 
 
 @dataclass(frozen=True, slots=True)

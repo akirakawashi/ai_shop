@@ -55,11 +55,11 @@ class VisualizationConfig(_BaseConfig):
     )
     inside_color: BgrColor = Field(
         default=(0, 190, 0),
-        description="BGR-цвет bbox с точкой опоры внутри ROI",
+        description="BGR-цвет bbox, пересекающего ROI",
     )
     outside_color: BgrColor = Field(
         default=(128, 128, 128),
-        description="BGR-цвет bbox с точкой опоры снаружи ROI",
+        description="BGR-цвет bbox, не пересекающего ROI",
     )
     roi_thickness: PositiveInt = Field(
         default=2,
@@ -104,11 +104,11 @@ class VisualizationConfig(_BaseConfig):
     )
     inside_state_label: NonBlankString = Field(
         default="IN",
-        description="Подпись bbox с точкой опоры внутри ROI",
+        description="Подпись bbox, пересекающего ROI",
     )
     outside_state_label: NonBlankString = Field(
         default="OUT",
-        description="Подпись bbox с точкой опоры снаружи ROI",
+        description="Подпись bbox, не пересекающего ROI",
     )
     bbox_label_template: str = Field(
         default="ID {track_id} | {roi_state}",
