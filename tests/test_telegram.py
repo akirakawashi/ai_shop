@@ -107,6 +107,40 @@ class TelegramNotifierTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(requests[0].url.path, "/proxy/botsecret-token/sendMessage")
 
+    async def test_token_with_colon_keeps_bot_path(self) -> None:
+        # Реальный токен имеет вид "<digits>:<...>"; без ведущего '/' httpx
+        # принимает "bot<digits>:" за URL-схему и теряет часть пути (404).
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"ok": True})
+
+        token = "8967594443:AAFh16aM0JW_OwWJOrI7g623mOJdPrLxa4Q"
+        client = httpx.AsyncClient(
+            base_url="https://telegram.test/",
+            transport=httpx.MockTransport(handler),
+        )
+        notifier = TelegramNotifier(
+            bot_token=token,
+            chat_id="42",
+            alert_message="Откройте вторую кассу",
+            api_base_url="https://telegram.test",
+            proxy_url=None,
+            timeout_seconds=1.0,
+            snapshot_filename="event.jpg",
+            max_retries=0,
+            retry_backoff_seconds=0.0,
+            client=client,
+        )
+        try:
+            await notifier.send(make_event())
+        finally:
+            await notifier.close()
+            await client.aclose()
+
+        self.assertEqual(requests[0].url.path, f"/bot{token}/sendMessage")
+
 
 if __name__ == "__main__":
     unittest.main()

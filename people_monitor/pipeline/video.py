@@ -23,6 +23,8 @@ from people_monitor.video import FrameSource
 _UNSAFE_FILENAME_CHARS: Final = re.compile(r"[^a-zA-Z0-9_.-]")
 _VISION_EXECUTOR_WORKERS: Final = 1
 _VISION_THREAD_PREFIX: Final = "vision-pipeline"
+_PREVIEW_WINDOW_TITLE: Final = "people-monitor preview"
+_PREVIEW_QUIT_KEY: Final = ord("q")
 
 
 class VideoPipeline:
@@ -38,6 +40,7 @@ class VideoPipeline:
         event_store: EventStore,
         notification_worker: AsyncNotificationWorker,
         notification_snapshots_enabled: bool,
+        preview: bool = False,
         logger: logging.Logger | None = None,
     ) -> None:
         self._settings = settings
@@ -48,6 +51,7 @@ class VideoPipeline:
         self._event_store = event_store
         self._notification_worker = notification_worker
         self._notification_snapshots_enabled = notification_snapshots_enabled
+        self._preview = preview
         self._logger = logger or logging.getLogger(__name__)
 
     async def run(self) -> None:
@@ -112,6 +116,10 @@ class VideoPipeline:
                 if writer is not None:
                     writer.write(rendered_frame)
 
+                if self._preview and not self._show_preview(rendered_frame):
+                    self._logger.info("Превью закрыто пользователем")
+                    break
+
                 snapshot = self._snapshot_if_needed(
                     rendered_frame,
                     has_events=bool(analysis.events),
@@ -142,8 +150,17 @@ class VideoPipeline:
                 finally:
                     if writer is not None:
                         writer.release()
+                    if self._preview:
+                        cv2.destroyAllWindows()
 
         self._logger.info("Обработка завершена, кадров: %s", frame_index)
+
+    def _show_preview(self, frame: Frame) -> bool:
+        """Показать кадр в окне; вернуть False, если запрошено закрытие."""
+        cv2.imshow(_PREVIEW_WINDOW_TITLE, frame)
+        # waitKey прокачивает GUI-события окна и ждёт ~1 мс; выполняется в
+        # главном потоке event loop, как того требует HighGUI backend.
+        return (cv2.waitKey(1) & 0xFF) != _PREVIEW_QUIT_KEY
 
     def _open_frame_source(self) -> int:
         self._frame_source.open()

@@ -35,6 +35,23 @@ class CameraConfig(_BaseConfig):
         default=CameraSourceKind.AUTO,
         description="Явный способ интерпретации источника",
     )
+    screen_monitor: PositiveInt = Field(
+        default=1,
+        description="Номер монитора для source_kind=screen (1 — основной)",
+    )
+    screen_region: (
+        tuple[NonNegativeInt, NonNegativeInt, PositiveInt, PositiveInt] | None
+    ) = Field(
+        default=None,
+        description=(
+            "Прямоугольник захвата [left, top, width, height]; "
+            "по умолчанию весь монитор"
+        ),
+    )
+    screen_fps: PositiveFloat = Field(
+        default=15.0,
+        description="Целевая частота захвата экрана в кадрах в секунду",
+    )
     stream_open_timeout_milliseconds: PositiveInt = Field(
         default=10_000,
         description="Backend timeout открытия сетевого потока",

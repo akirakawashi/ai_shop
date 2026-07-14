@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from people_monitor.config import AppConfig
+from people_monitor.config import AppConfig, CameraSourceKind
 from people_monitor.detection import UltralyticsPeopleTracker
 from people_monitor.events import QueueOccupancyMonitor
 from people_monitor.geometry import ConvexPolygonRoi
@@ -17,7 +17,7 @@ from people_monitor.notifications import (
 )
 from people_monitor.pipeline import VideoPipeline
 from people_monitor.storage import JsonlEventStore
-from people_monitor.video import OpenCvFrameSource
+from people_monitor.video import FrameSource, OpenCvFrameSource, ScreenFrameSource
 from people_monitor.visualization import FrameRenderer
 
 
@@ -27,7 +27,11 @@ class _NotifierBinding:
     include_snapshot: bool
 
 
-async def run(settings: AppConfig, dry_run: bool = False) -> None:
+async def run(
+    settings: AppConfig,
+    dry_run: bool = False,
+    preview: bool = False,
+) -> None:
     """Собрать и запустить приложение для одной камеры."""
     notifier_binding = _build_notifier(settings, dry_run=dry_run)
     notification_worker: AsyncNotificationWorker | None = None
@@ -63,13 +67,11 @@ async def run(settings: AppConfig, dry_run: bool = False) -> None:
             tracker=tracker,
             monitor=monitor,
             renderer=FrameRenderer(roi=roi, settings=settings.visualization),
-            frame_source=OpenCvFrameSource(
-                settings=settings.camera,
-                fallback_fps=settings.runtime.fallback_fps,
-            ),
+            frame_source=_build_frame_source(settings),
             event_store=JsonlEventStore(settings.output.events_file),
             notification_worker=notification_worker,
             notification_snapshots_enabled=notifier_binding.include_snapshot,
+            preview=preview,
         )
         await pipeline.run()
     finally:
@@ -82,6 +84,16 @@ async def run(settings: AppConfig, dry_run: bool = False) -> None:
                 logging.getLogger(__name__).exception(
                     "Не удалось закрыть канал после ошибки сборки приложения"
                 )
+
+
+def _build_frame_source(settings: AppConfig) -> FrameSource:
+    """Выбрать источник кадров по способу интерпретации источника."""
+    if settings.camera.source_kind is CameraSourceKind.SCREEN:
+        return ScreenFrameSource(settings=settings.camera)
+    return OpenCvFrameSource(
+        settings=settings.camera,
+        fallback_fps=settings.runtime.fallback_fps,
+    )
 
 
 def _build_notifier(settings: AppConfig, dry_run: bool) -> _NotifierBinding:

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from people_monitor.config._base import DEFAULT_ENV_FILE
 from people_monitor.config.camera import CameraConfig
+from people_monitor.config.enums import CameraSourceKind
 from people_monitor.config.event import EventConfig
 from people_monitor.config.model import ModelConfig
 from people_monitor.config.notifications import NotificationConfig, TelegramConfig
@@ -41,10 +42,18 @@ class AppConfig(BaseModel):
     def from_env(
         cls,
         env_file: str | Path | None = DEFAULT_ENV_FILE,
+        source_kind: CameraSourceKind | None = None,
     ) -> Self:
-        """Загрузить все секции из одного env-файла и окружения процесса."""
+        """Загрузить все секции из одного env-файла и окружения процесса.
+
+        ``source_kind`` переопределяет ``camera.source_kind`` из env, позволяя
+        быстро переключать сценарий (камера/экран) без правки файлов.
+        """
+        camera_overrides: dict[str, CameraSourceKind] = (
+            {"source_kind": source_kind} if source_kind is not None else {}
+        )
         return cls(
-            camera=CameraConfig(_env_file=env_file),
+            camera=CameraConfig(_env_file=env_file, **camera_overrides),
             model=ModelConfig(_env_file=env_file),
             roi=RoiConfig(_env_file=env_file),
             event=EventConfig(_env_file=env_file),

@@ -105,10 +105,36 @@ uv run python main.py
 uv run python main.py --dry-run
 ```
 
+Окно с детекцией в реальном времени (закрыть — клавиша `q`):
+
+```bash
+uv run python main.py --preview
+```
+
 Другой файл настроек:
 
 ```bash
 uv run python main.py --env-file deployment/camera-1.env
+```
+
+## Переключение источника: камера или экран
+
+Источник задаётся `CAMERA_SOURCE_KIND` в `.env`, но сценарий можно быстро
+переопределить на запуске флагом `--source`, не редактируя файлы:
+
+```bash
+uv run python main.py --source camera    # веб-камера/устройство (CAMERA_SOURCE=0)
+uv run python main.py --source screen    # захват рабочего стола
+uv run python main.py --source file      # видеофайл из CAMERA_SOURCE
+```
+
+Для захвата экрана (`screen`) используются `CAMERA_SCREEN_MONITOR` (номер
+монитора, `1` — основной), необязательный `CAMERA_SCREEN_REGION=[left,top,width,height]`
+и `CAMERA_SCREEN_FPS`. Флаг `--source` совместим с `--preview` и `--dry-run`,
+например «посмотреть детекцию с экрана без Telegram»:
+
+```bash
+uv run python main.py --source screen --preview --dry-run
 ```
 
 Процесс работает, пока открыт терминал и не получен `Ctrl+C`. Для постоянного

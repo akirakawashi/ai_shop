@@ -25,8 +25,5 @@ def format_event_message(event: QueueFullEvent, alert_message: str) -> str:
     return (
         f"{alert_message}\n"
         f"Камера: {event.camera_id}\n"
-        f"Людей в зоне: {event.people_count}\n"
-        f"Вместимость зоны: {event.capacity}\n"
-        f"ID события: {event.event_id}\n"
-        f"Время: {event.occurred_at.astimezone().isoformat(timespec='seconds')}"
+        f"Людей в зоне: {event.people_count}"
     )

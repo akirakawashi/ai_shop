@@ -162,7 +162,10 @@ class TelegramNotifier(Notifier):
         for attempt in range(self._max_retries + 1):
             try:
                 response = await self._client.post(
-                    f"bot{self._bot_token}/{method.value}",
+                    # Ведущий '/' обязателен: токен имеет вид "<digits>:<...>",
+                    # и без него httpx принимает "bot<digits>:" за URL-схему и
+                    # теряет часть пути (Telegram отвечает 404 Not Found).
+                    f"/bot{self._bot_token}/{method.value}",
                     json=json_payload,
                     data=form_data,
                     files=files,

@@ -24,6 +24,7 @@ class CameraSourceKind(StrEnum):
     DEVICE = "device"
     FILE = "file"
     STREAM = "stream"
+    SCREEN = "screen"
 
 
 class LogLevel(StrEnum):

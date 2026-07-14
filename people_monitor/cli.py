@@ -8,7 +8,16 @@ import logging
 from pathlib import Path
 
 from people_monitor.app import run
-from people_monitor.config import AppConfig
+from people_monitor.config import AppConfig, CameraSourceKind
+
+# Дружелюбные имена сценариев для CLI поверх значений CameraSourceKind.
+_SOURCE_CHOICES: dict[str, CameraSourceKind] = {
+    "camera": CameraSourceKind.DEVICE,
+    "screen": CameraSourceKind.SCREEN,
+    "file": CameraSourceKind.FILE,
+    "stream": CameraSourceKind.STREAM,
+    "auto": CameraSourceKind.AUTO,
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -26,18 +35,29 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="не обращаться к Telegram, а записывать уведомления в лог",
     )
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="показывать окно с детекцией в реальном времени (выход — клавиша q)",
+    )
+    parser.add_argument(
+        "--source",
+        choices=sorted(_SOURCE_CHOICES),
+        default=None,
+        help="переопределить сценарий источника (напр. camera или screen)",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    settings = (
-        AppConfig.from_env(args.env_file)
-        if args.env_file is not None
-        else AppConfig.from_env()
-    )
+    source_kind = _SOURCE_CHOICES[args.source] if args.source is not None else None
+    from_env_kwargs: dict[str, object] = {"source_kind": source_kind}
+    if args.env_file is not None:
+        from_env_kwargs["env_file"] = args.env_file
+    settings = AppConfig.from_env(**from_env_kwargs)
     logging.basicConfig(
         level=settings.runtime.log_level.value,
         format=settings.runtime.log_format,
     )
-    asyncio.run(run(settings, dry_run=args.dry_run))
+    asyncio.run(run(settings, dry_run=args.dry_run, preview=args.preview))
