@@ -21,7 +21,7 @@ class ModelConfig(_BaseConfig):
     model_config = SettingsConfigDict(env_prefix="MODEL_")
 
     weights: NonBlankString = Field(
-        default="yolov8n.pt",
+        default="yolov8s.pt",
         description="Путь или имя весов YOLO",
     )
     confidence: Probability = Field(

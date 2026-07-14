@@ -47,7 +47,7 @@ class AppConfigTest(unittest.TestCase):
             settings = AppConfig.from_env(Path(".env.example"))
 
         self.assertEqual(settings.camera.id, "shop-entrance")
-        self.assertEqual(settings.event.roi_capacity, 1)
+        self.assertEqual(settings.event.roi_capacity, 2)
         self.assertFalse(settings.telegram.enabled)
         self.assertIsNone(settings.telegram.bot_token)
         self.assertIsNone(settings.telegram.chat_id)
@@ -58,7 +58,8 @@ class AppConfigTest(unittest.TestCase):
             settings = AppConfig.from_env(None)
 
         self.assertEqual(settings.camera.source, "test.mp4")
-        self.assertEqual(settings.event.full_confirm_frames, 5)
+        self.assertEqual(settings.model.weights, "yolov8s.pt")
+        self.assertEqual(settings.event.full_confirm_seconds, 20.0)
         self.assertFalse(settings.telegram.enabled)
 
     def test_prefixed_environment_overrides_defaults(self) -> None:

@@ -25,7 +25,7 @@ class _OccupancyState:
     """Закрытое изменяемое состояние одной ROI."""
 
     phase: QueueState = QueueState.AVAILABLE
-    full_streak: int = 0
+    full_since_clock: float | None = None
     recovery_streak: int = 0
     last_alert_clock: float | None = None
     last_frame_index: int | None = None
@@ -97,7 +97,7 @@ class QueueOccupancyMonitor:
         if previous_frame is not None and frame_index <= previous_frame:
             raise ValueError("frame_index должен строго возрастать")
         if previous_frame is not None and frame_index != previous_frame + 1:
-            self._state.full_streak = 0
+            self._state.full_since_clock = None
             self._state.recovery_streak = 0
             if self._state.phase is QueueState.CONFIRMING_FULL:
                 self._state.phase = QueueState.AVAILABLE
@@ -158,7 +158,7 @@ class QueueOccupancyMonitor:
         )
 
     def _handle_available_capacity(self) -> None:
-        self._state.full_streak = 0
+        self._state.full_since_clock = None
         if self._state.phase in (
             QueueState.AVAILABLE,
             QueueState.CONFIRMING_FULL,
@@ -188,20 +188,23 @@ class QueueOccupancyMonitor:
         if self._state.phase is QueueState.RECOVERING:
             # Очередь снова заполнилась до завершения recovery: старое событие активно.
             self._state.phase = QueueState.FULL
-            self._state.full_streak = 0
+            self._state.full_since_clock = None
             return None
         if self._state.phase is QueueState.AVAILABLE:
             self._state.phase = QueueState.CONFIRMING_FULL
-            self._state.full_streak = 0
+            self._state.full_since_clock = clock
 
-        self._state.full_streak += 1
-        if self._state.full_streak < self._settings.full_confirm_frames:
+        full_since_clock = self._state.full_since_clock
+        if full_since_clock is None:
+            self._state.full_since_clock = clock
+            return None
+        if clock - full_since_clock <= self._settings.full_confirm_seconds:
             return None
         if not self._cooldown_elapsed(clock):
             return None
 
         self._state.phase = QueueState.FULL
-        self._state.full_streak = 0
+        self._state.full_since_clock = None
         self._state.last_alert_clock = clock
         return QueueFullEvent(
             event_id=uuid4(),

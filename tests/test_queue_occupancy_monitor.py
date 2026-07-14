@@ -30,7 +30,7 @@ class QueueOccupancyMonitorTest(unittest.TestCase):
         self,
         *,
         capacity: int = 1,
-        full_confirm_frames: int = 2,
+        full_confirm_seconds: float = 0.5,
         recovery_confirm_frames: int = 2,
         cooldown_seconds: float = 0.0,
     ) -> QueueOccupancyMonitor:
@@ -39,7 +39,7 @@ class QueueOccupancyMonitorTest(unittest.TestCase):
             roi=self.roi,
             settings=EventConfig(
                 roi_capacity=capacity,
-                full_confirm_frames=full_confirm_frames,
+                full_confirm_seconds=full_confirm_seconds,
                 recovery_confirm_frames=recovery_confirm_frames,
                 cooldown_seconds=cooldown_seconds,
                 _env_file=None,
@@ -118,7 +118,7 @@ class QueueOccupancyMonitorTest(unittest.TestCase):
         self.assertIs(result.queue_state, QueueState.FULL)
 
     def test_capacity_counts_unique_tracked_people(self) -> None:
-        monitor = self.make_monitor(capacity=2, full_confirm_frames=1)
+        monitor = self.make_monitor(capacity=2)
         one_person_twice = (
             self.detection(self.inside_box, 7, confidence=0.7),
             self.detection(self.inside_box, 7, confidence=0.9),
@@ -133,11 +133,52 @@ class QueueOccupancyMonitorTest(unittest.TestCase):
             ),
             1,
         )
+        confirmed = self.analyze(
+            monitor,
+            (
+                self.detection(self.inside_box, 7),
+                self.detection(BoundingBox(40, 20, 70, 65), 8),
+            ),
+            2,
+        )
 
         self.assertEqual(one.people_count, 1)
         self.assertFalse(one.events)
         self.assertEqual(two.people_count, 2)
-        self.assertTrue(two.events)
+        self.assertFalse(two.events)
+        self.assertTrue(confirmed.events)
+
+    def test_capacity_must_remain_full_for_more_than_configured_seconds(self) -> None:
+        monitor = self.make_monitor(capacity=2, full_confirm_seconds=20.0)
+        people = (
+            self.detection(self.inside_box, 7),
+            self.detection(BoundingBox(40, 20, 70, 65), 8),
+        )
+
+        started = self.analyze(monitor, people, 0, clock=100.0)
+        before_limit = self.analyze(monitor, people, 1, clock=119.9)
+        at_limit = self.analyze(monitor, people, 2, clock=120.0)
+        after_limit = self.analyze(monitor, people, 3, clock=120.1)
+
+        self.assertFalse(started.events)
+        self.assertFalse(before_limit.events)
+        self.assertFalse(at_limit.events)
+        self.assertTrue(after_limit.events)
+
+    def test_timer_restarts_when_people_count_drops_below_capacity(self) -> None:
+        monitor = self.make_monitor(capacity=2, full_confirm_seconds=20.0)
+        first = self.detection(self.inside_box, 7)
+        second = self.detection(BoundingBox(40, 20, 70, 65), 8)
+
+        self.analyze(monitor, (first, second), 0, clock=0.0)
+        self.analyze(monitor, (first, second), 1, clock=15.0)
+        self.analyze(monitor, (first,), 2, clock=15.1)
+        self.analyze(monitor, (first, second), 3, clock=16.0)
+        at_new_limit = self.analyze(monitor, (first, second), 4, clock=36.0)
+        after_new_limit = self.analyze(monitor, (first, second), 5, clock=36.1)
+
+        self.assertFalse(at_new_limit.events)
+        self.assertTrue(after_new_limit.events)
 
     def test_untracked_detection_is_visible_but_not_counted(self) -> None:
         result = self.analyze(
@@ -174,16 +215,18 @@ class QueueOccupancyMonitorTest(unittest.TestCase):
 
     def test_cooldown_delays_repeated_notification_without_losing_it(self) -> None:
         monitor = self.make_monitor(
-            full_confirm_frames=1,
+            full_confirm_seconds=0.5,
             recovery_confirm_frames=1,
             cooldown_seconds=10.0,
         )
         person = (self.detection(self.inside_box, 7),)
 
-        self.assertTrue(self.analyze(monitor, person, 0, clock=0.0).events)
-        self.analyze(monitor, (), 1, clock=1.0)
-        self.assertFalse(self.analyze(monitor, person, 2, clock=5.0).events)
-        self.assertTrue(self.analyze(monitor, person, 3, clock=10.0).events)
+        self.assertFalse(self.analyze(monitor, person, 0, clock=0.0).events)
+        self.assertTrue(self.analyze(monitor, person, 1, clock=1.0).events)
+        self.analyze(monitor, (), 2, clock=2.0)
+        self.assertFalse(self.analyze(monitor, person, 3, clock=5.0).events)
+        self.assertFalse(self.analyze(monitor, person, 4, clock=6.0).events)
+        self.assertTrue(self.analyze(monitor, person, 5, clock=11.0).events)
 
     def test_reset_requires_new_confirmation(self) -> None:
         person = (self.detection(self.inside_box, 7),)
