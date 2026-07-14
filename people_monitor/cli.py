@@ -46,6 +46,14 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="переопределить сценарий источника (напр. camera или screen)",
     )
+    parser.add_argument(
+        "--overlay",
+        action="store_true",
+        help=(
+            "рисовать ROI и рамки прозрачным слоем поверх рабочего стола; "
+            "только вместе с --source screen"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -60,4 +68,11 @@ def main() -> None:
         level=settings.runtime.log_level.value,
         format=settings.runtime.log_format,
     )
-    asyncio.run(run(settings, dry_run=args.dry_run, preview=args.preview))
+    asyncio.run(
+        run(
+            settings,
+            dry_run=args.dry_run,
+            preview=args.preview,
+            overlay=args.overlay,
+        )
+    )

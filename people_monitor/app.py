@@ -18,7 +18,7 @@ from people_monitor.notifications import (
 from people_monitor.pipeline import VideoPipeline
 from people_monitor.storage import JsonlEventStore
 from people_monitor.video import FrameSource, OpenCvFrameSource, ScreenFrameSource
-from people_monitor.visualization import FrameRenderer
+from people_monitor.visualization import FrameRenderer, ScreenOverlay
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,8 +31,14 @@ async def run(
     settings: AppConfig,
     dry_run: bool = False,
     preview: bool = False,
+    overlay: bool = False,
 ) -> None:
     """Собрать и запустить приложение для одной камеры."""
+    if overlay and settings.camera.source_kind is not CameraSourceKind.SCREEN:
+        raise RuntimeError(
+            "Оверлей рисуется поверх захватываемого экрана и доступен только "
+            "при source_kind=screen (--source screen)"
+        )
     notifier_binding = _build_notifier(settings, dry_run=dry_run)
     notification_worker: AsyncNotificationWorker | None = None
     try:
@@ -62,16 +68,26 @@ async def run(
             roi=roi,
             settings=settings.event,
         )
+        frame_source = _build_frame_source(settings)
+        overlay_view: ScreenOverlay | None = None
+        if overlay and isinstance(frame_source, ScreenFrameSource):
+            # Регион известен только после open(), поэтому передаём его лениво.
+            overlay_view = ScreenOverlay(
+                region_provider=lambda: frame_source.region,
+                roi=roi,
+                settings=settings.visualization,
+            )
         pipeline = VideoPipeline(
             settings=settings,
             tracker=tracker,
             monitor=monitor,
             renderer=FrameRenderer(roi=roi, settings=settings.visualization),
-            frame_source=_build_frame_source(settings),
+            frame_source=frame_source,
             event_store=JsonlEventStore(settings.output.events_file),
             notification_worker=notification_worker,
             notification_snapshots_enabled=notifier_binding.include_snapshot,
             preview=preview,
+            overlay=overlay_view,
         )
         await pipeline.run()
     finally:

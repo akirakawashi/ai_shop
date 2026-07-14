@@ -17,7 +17,7 @@ from people_monitor.domain import Frame, QueueFullEvent
 from people_monitor.events import QueueOccupancyMonitor
 from people_monitor.notifications import AsyncNotificationWorker
 from people_monitor.storage import EventStore
-from people_monitor.visualization import FrameRenderer
+from people_monitor.visualization import FrameRenderer, ScreenOverlay
 from people_monitor.video import FrameSource
 
 _UNSAFE_FILENAME_CHARS: Final = re.compile(r"[^a-zA-Z0-9_.-]")
@@ -41,6 +41,7 @@ class VideoPipeline:
         notification_worker: AsyncNotificationWorker,
         notification_snapshots_enabled: bool,
         preview: bool = False,
+        overlay: ScreenOverlay | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
         self._settings = settings
@@ -52,6 +53,7 @@ class VideoPipeline:
         self._notification_worker = notification_worker
         self._notification_snapshots_enabled = notification_snapshots_enabled
         self._preview = preview
+        self._overlay = overlay
         self._logger = logger or logging.getLogger(__name__)
 
     async def run(self) -> None:
@@ -68,6 +70,10 @@ class VideoPipeline:
                 vision_executor,
                 self._open_frame_source,
             )
+            # Tk обязан жить в потоке, который его создал: держим оверлей на
+            # главном потоке event loop, где выполняется и цикл кадров.
+            if self._overlay is not None:
+                self._overlay.open()
             while True:
                 frame, video_time_seconds, generation = await event_loop.run_in_executor(
                     vision_executor,
@@ -120,6 +126,16 @@ class VideoPipeline:
                     self._logger.info("Превью закрыто пользователем")
                     break
 
+                if self._overlay is not None and not self._overlay.draw(
+                    analysis,
+                    width,
+                    height,
+                ):
+                    # Оверлей — вспомогательная визуализация: его пропажа не
+                    # должна останавливать детекцию и уведомления.
+                    self._overlay.close()
+                    self._overlay = None
+
                 snapshot = self._snapshot_if_needed(
                     rendered_frame,
                     has_events=bool(analysis.events),
@@ -152,6 +168,8 @@ class VideoPipeline:
                         writer.release()
                     if self._preview:
                         cv2.destroyAllWindows()
+                    if self._overlay is not None:
+                        self._overlay.close()
 
         self._logger.info("Обработка завершена, кадров: %s", frame_index)
 

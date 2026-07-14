@@ -123,8 +123,9 @@ uv run python main.py --env-file deployment/camera-1.env
 переопределить на запуске флагом `--source`, не редактируя файлы:
 
 ```bash
-uv run python main.py --source camera    # веб-камера/устройство (CAMERA_SOURCE=0)
+uv run python main.py --source camera --preview
 uv run python main.py --source screen    # захват рабочего стола
+uv run python main.py --source screen --overlay
 uv run python main.py --source file      # видеофайл из CAMERA_SOURCE
 ```
 
@@ -136,6 +137,21 @@ uv run python main.py --source file      # видеофайл из CAMERA_SOURCE
 ```bash
 uv run python main.py --source screen --preview --dry-run
 ```
+
+### Разметка поверх рабочего стола
+
+Флаг `--overlay` рисует ROI и рамки прозрачным слоем прямо поверх экрана, без
+отдельного окна:
+
+```bash
+uv run python main.py --source screen --overlay
+```
+
+Оверлей не перехватывает клики (мышь проходит насквозь) и исключён из захвата
+(`WDA_EXCLUDEFROMCAPTURE`), поэтому собственная разметка не попадает обратно в
+кадр, в снимки событий и не мешает детекции. Флаг доступен только вместе с
+`--source screen` и требует Windows 10 версии 2004 или новее. Закрывается вместе
+с приложением по `Ctrl+C`.
 
 Процесс работает, пока открыт терминал и не получен `Ctrl+C`. Для постоянного
 развёртывания следует запускать отдельный экземпляр приложения на камеру через

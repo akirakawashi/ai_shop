@@ -44,6 +44,13 @@ class ScreenFrameSource:
     def fps(self) -> float:
         return self._settings.screen_fps
 
+    @property
+    def region(self) -> dict[str, int]:
+        """Экранные координаты области захвата; доступны после open()."""
+        if self._region is None:
+            raise RuntimeError("Источник экрана ещё не открыт")
+        return dict(self._region)
+
     def open(self) -> None:
         if self._grabber is not None:
             raise RuntimeError("Источник экрана уже открыт")
@@ -95,7 +102,7 @@ class ScreenFrameSource:
             raise RuntimeError(
                 "Для source_kind=screen нужен пакет mss (uv add mss)"
             ) from error
-        return mss.mss()
+        return mss.MSS()
 
     def _resolve_region(self, grabber: Any) -> dict[str, int]:
         region = self._settings.screen_region
